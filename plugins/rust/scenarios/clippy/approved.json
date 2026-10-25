@@ -1,0 +1,38 @@
+[
+  {
+    "smell": "non-const-binding",
+    "language": "rust",
+    "details": {},
+    "issues": [
+      {
+        "key": "plugins/rust/scenarios/clippy/sample/src/lib.rs",
+        "details": {
+          "file": "plugins/rust/scenarios/clippy/sample/src/lib.rs",
+          "line": 2,
+          "column": 9,
+          "content": "let mut unused_val = 42;",
+          "message": "variable does not need to be mutable",
+          "source": "unused_mut"
+        }
+      }
+    ]
+  },
+  {
+    "smell": "unused-variable",
+    "language": "rust",
+    "details": {},
+    "issues": [
+      {
+        "key": "plugins/rust/scenarios/clippy/sample/src/lib.rs",
+        "details": {
+          "file": "plugins/rust/scenarios/clippy/sample/src/lib.rs",
+          "line": 2,
+          "column": 9,
+          "content": "let mut unused_val = 42;",
+          "message": "unused variable: `unused_val`",
+          "source": "unused_variables"
+        }
+      }
+    ]
+  }
+]

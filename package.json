@@ -1,0 +1,34 @@
+{
+  "name": "pi-habit-hooks",
+  "version": "1.5.0",
+  "type": "module",
+  "description": "Code-quality coaching engine translating lint violations into canonical smell vocabulary with AI coaching prompts",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "omp",
+    "pi-extension",
+    "rust",
+    "code-quality"
+  ],
+  "dependencies": {
+    "jscpd": "^4.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.5.0"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/extensions/index.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "scripts": {
+    "build": "cargo build --release && tsc",
+    "test": "cargo test && tsc && node --test dist/tests/extension.test.js",
+    "typecheck": "tsc --noEmit"
+  }
+}

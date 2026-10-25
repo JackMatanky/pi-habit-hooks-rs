@@ -1,0 +1,28 @@
+[
+  {
+    "smell": "duplicated-code",
+    "details": {},
+    "issues": [
+      {
+        "key": "plugins/generic/scenarios/jscpd/sample/first.js",
+        "details": {
+          "file": "plugins/generic/scenarios/jscpd/sample/first.js",
+          "line": 1,
+          "column": 1,
+          "message": "Duplicate code block (7 lines, 59 tokens) matches plugins/generic/scenarios/jscpd/sample/second.js:1",
+          "source": "jscpd"
+        }
+      },
+      {
+        "key": "plugins/generic/scenarios/jscpd/sample/second.js",
+        "details": {
+          "file": "plugins/generic/scenarios/jscpd/sample/second.js",
+          "line": 1,
+          "column": 1,
+          "message": "Duplicate code block (7 lines, 59 tokens) matches plugins/generic/scenarios/jscpd/sample/first.js:1",
+          "source": "jscpd"
+        }
+      }
+    ]
+  }
+]

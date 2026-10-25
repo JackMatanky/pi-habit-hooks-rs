@@ -1,0 +1,11 @@
+#!/bin/sh
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+if [ -f "$ROOT_DIR/target/release/comment_sensor" ]; then
+    exec "$ROOT_DIR/target/release/comment_sensor" "$@"
+elif [ -f "$ROOT_DIR/target/debug/comment_sensor" ]; then
+    exec "$ROOT_DIR/target/debug/comment_sensor" "$@"
+else
+    exec cargo run --quiet --manifest-path "$ROOT_DIR/Cargo.toml" --bin comment_sensor -- "$@"
+fi

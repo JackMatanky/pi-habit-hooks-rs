@@ -1,0 +1,17 @@
+[package]
+name = "habit-mapper"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+habit-core = { path = "../habit-core" }
+serde.workspace = true
+serde_json.workspace = true
+minijinja.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
