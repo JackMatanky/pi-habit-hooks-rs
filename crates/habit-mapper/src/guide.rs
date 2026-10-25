@@ -1,5 +1,6 @@
 use habit_core::Finding;
-use minijinja::Environment;
+use minijinja::value::Serde;
+use minijinja::{Environment, Value};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -160,8 +161,8 @@ impl GuideResolver {
         let ctx = minijinja::context! {
             smell => &finding.smell,
             language => &finding.language,
-            details => &finding.details,
-            issues => &finding.issues,
+            details => Value::from(Serde(&finding.details)),
+            issues => Value::from(Serde(&finding.issues)),
         };
 
         tmpl.render(ctx)

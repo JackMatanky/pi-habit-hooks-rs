@@ -2,6 +2,7 @@ use chrono::Utc;
 use habit_core::Finding;
 use serde::{Deserialize, Serialize};
 use sha1::{Digest, Sha1};
+use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -103,7 +104,12 @@ pub fn compute_blob_sha(project_dir: &Path, relative_file: &str) -> Option<Strin
     let mut hasher = Sha1::new();
     hasher.update(header.as_bytes());
     hasher.update(&bytes);
-    Some(format!("{:x}", hasher.finalize()))
+    let hash_bytes = hasher.finalize();
+    let mut hex_str = String::with_capacity(40);
+    for b in hash_bytes {
+        let _ = write!(&mut hex_str, "{:02x}", b);
+    }
+    Some(hex_str)
 }
 
 pub fn filter_snoozed_findings(
