@@ -12,11 +12,11 @@
     "code-quality"
   ],
   "dependencies": {
-    "jscpd": "^4.2.4"
+    "jscpd": "^5.4.2"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "typescript": "^5.5.0"
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
   },
   "pi": {
     "extensions": [

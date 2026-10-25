@@ -7,7 +7,8 @@ files = [
 ]
 
 sensors = [
-  { name = "jscpd", tool = "jscpd", args = ["--config", "${dir}/.jscpd.json", "--reporters", "json", "--output", "${report}", "${files}"], success_exit_codes = [0, 1], transform = "jscpd.jq" }
+  { name = "line-count", tool = "${dir}/sensors/line_count_sensor", args = ["${files}"], success_exit_codes = [0], transform = "line-count.jq" },
+  { name = "jscpd", tool = "jscpd", args = ["--config", "${dir}/.jscpd.json", "-a", "--reporters", "json", "--output", "${report}", "${files}"], success_exit_codes = [0, 1], transform = "jscpd.jq" }
 ]
 
 detectors = [

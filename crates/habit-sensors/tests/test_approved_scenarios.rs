@@ -84,3 +84,70 @@ fn verifies_messrust_scenario_against_approved_json() {
 
     assert_eq!(actual, expected);
 }
+
+#[test]
+fn verifies_line_count_scenario_against_approved_json() {
+    let workspace = get_workspace_root();
+    let scenario_dir = workspace
+        .join("plugins")
+        .join("generic")
+        .join("scenarios")
+        .join("line-count");
+
+    let approved_path = scenario_dir.join("approved.json");
+    let approved_str = fs::read_to_string(&approved_path).unwrap();
+    let expected: Vec<Finding> = serde_json::from_str(&approved_str).unwrap();
+
+    let plugin_config_path = workspace.join("plugins").join("generic").join("config.toml");
+    let mut plugin_cfg = PluginConfig::load_from_file(&plugin_config_path).unwrap();
+
+    // Limit sensors to just line-count
+    plugin_cfg.sensors.retain(|s| s.name == "line-count");
+
+    let sample_file = "plugins/generic/scenarios/line-count/sample/big.txt".to_string();
+    let scope_args = ScopeArgs {
+        files: vec![sample_file],
+        ..Default::default()
+    };
+
+    let project_cfg = ProjectConfig::default();
+    let plugins = [plugin_cfg];
+    let runner = SensorRunner::new(&workspace, &project_cfg, &plugins, &scope_args);
+    let actual = runner.run_all();
+
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn verifies_jscpd_scenario_against_approved_json() {
+    let workspace = get_workspace_root();
+    let scenario_dir = workspace
+        .join("plugins")
+        .join("generic")
+        .join("scenarios")
+        .join("jscpd");
+
+    let approved_path = scenario_dir.join("approved.json");
+    let approved_str = fs::read_to_string(&approved_path).unwrap();
+    let expected: Vec<Finding> = serde_json::from_str(&approved_str).unwrap();
+
+    let plugin_config_path = workspace.join("plugins").join("generic").join("config.toml");
+    let mut plugin_cfg = PluginConfig::load_from_file(&plugin_config_path).unwrap();
+
+    // Limit sensors to just jscpd
+    plugin_cfg.sensors.retain(|s| s.name == "jscpd");
+
+    let sample_file1 = "plugins/generic/scenarios/jscpd/sample/first.js".to_string();
+    let sample_file2 = "plugins/generic/scenarios/jscpd/sample/second.js".to_string();
+    let scope_args = ScopeArgs {
+        files: vec![sample_file1, sample_file2],
+        ..Default::default()
+    };
+
+    let project_cfg = ProjectConfig::default();
+    let plugins = [plugin_cfg];
+    let runner = SensorRunner::new(&workspace, &project_cfg, &plugins, &scope_args);
+    let actual = runner.run_all();
+
+    assert_eq!(actual, expected);
+}

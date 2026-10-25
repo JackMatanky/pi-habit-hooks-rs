@@ -1,0 +1,17 @@
+[
+  {
+    "smell": "oversized-file",
+    "details": {},
+    "issues": [
+      {
+        "key": "plugins/generic/scenarios/line-count/sample/big.txt",
+        "details": {
+          "file": "plugins/generic/scenarios/line-count/sample/big.txt",
+          "line": 551,
+          "message": "File length (551 lines) exceeds threshold of 500 lines",
+          "source": "line-count"
+        }
+      }
+    ]
+  }
+]

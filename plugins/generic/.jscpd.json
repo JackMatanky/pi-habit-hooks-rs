@@ -1,7 +1,7 @@
 {
   "threshold": 0,
   "minLines": 5,
-  "minTokens": 50,
+  "minTokens": 25,
   "reporters": ["json"],
   "ignore": [
     "**/node_modules/**",

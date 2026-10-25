@@ -1,0 +1,17 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+
+const files = process.argv.slice(2);
+const results = [];
+
+for (const file of files) {
+  try {
+    if (fs.existsSync(file) && fs.statSync(file).isFile()) {
+      const content = fs.readFileSync(file, "utf-8");
+      const lines = content.split("\n").length;
+      results.push({ file, lines, threshold: 500 });
+    }
+  } catch {}
+}
+
+console.log(JSON.stringify(results));
