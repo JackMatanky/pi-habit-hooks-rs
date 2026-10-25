@@ -22,16 +22,20 @@ test("runHabitSnooze supports list action", () => {
 });
 
 test("registers tools and commands with host", () => {
-  const registeredTools: string[] = [];
+  const registeredTools: Record<string, unknown>[] = [];
   const registeredCommands: string[] = [];
   let promptInjected = false;
 
   const mockPi = {
-    registerTool: (tool: { name: string }) => {
-      registeredTools.push(tool.name);
+    registerTool: (tool: Record<string, unknown>) => {
+      registeredTools.push(tool);
     },
-    registerCommand: (cmd: { name: string }) => {
-      registeredCommands.push(cmd.name);
+    registerCommand: (...args: unknown[]) => {
+      if (typeof args[0] === "string") {
+        registeredCommands.push(args[0]);
+      } else if (args[0] && typeof args[0] === "object" && "name" in args[0]) {
+        registeredCommands.push(String((args[0] as { name: unknown }).name));
+      }
     },
     injectSystemPrompt: (_prompt: string) => {
       promptInjected = true;
@@ -40,7 +44,14 @@ test("registers tools and commands with host", () => {
 
   registerExtension(mockPi);
 
-  assert.deepEqual(registeredTools, ["habit_hooks", "habit_snooze"]);
+  const toolNames = registeredTools.map((t) => t.name);
+  assert.deepEqual(toolNames, ["habit_hooks", "habit_snooze"]);
   assert.deepEqual(registeredCommands, ["habit-hooks", "snooze"]);
   assert.equal(promptInjected, true);
+
+  // Verify both execute and handler exist on registered tools
+  for (const t of registeredTools) {
+    assert.equal(typeof t.execute, "function");
+    assert.equal(typeof t.handler, "function");
+  }
 });

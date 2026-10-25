@@ -23,17 +23,28 @@ test("registers tools and commands with host", () => {
     let promptInjected = false;
     const mockPi = {
         registerTool: (tool) => {
-            registeredTools.push(tool.name);
+            registeredTools.push(tool);
         },
-        registerCommand: (cmd) => {
-            registeredCommands.push(cmd.name);
+        registerCommand: (...args) => {
+            if (typeof args[0] === "string") {
+                registeredCommands.push(args[0]);
+            }
+            else if (args[0] && typeof args[0] === "object" && "name" in args[0]) {
+                registeredCommands.push(String(args[0].name));
+            }
         },
         injectSystemPrompt: (_prompt) => {
             promptInjected = true;
         },
     };
     registerExtension(mockPi);
-    assert.deepEqual(registeredTools, ["habit_hooks", "habit_snooze"]);
+    const toolNames = registeredTools.map((t) => t.name);
+    assert.deepEqual(toolNames, ["habit_hooks", "habit_snooze"]);
     assert.deepEqual(registeredCommands, ["habit-hooks", "snooze"]);
     assert.equal(promptInjected, true);
+    // Verify both execute and handler exist on registered tools
+    for (const t of registeredTools) {
+        assert.equal(typeof t.execute, "function");
+        assert.equal(typeof t.handler, "function");
+    }
 });

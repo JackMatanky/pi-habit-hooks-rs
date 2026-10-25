@@ -1,13 +1,14 @@
-export interface ToolDefinition {
-    name: string;
-    description: string;
-    parameters: Record<string, unknown>;
-    handler: (args: Record<string, unknown>, context?: ExtensionContext) => Promise<unknown>;
+export interface ToolContent {
+    type: "text";
+    text: string;
 }
-export interface CommandDefinition {
-    name: string;
-    description: string;
-    handler: (args: string, context?: ExtensionContext) => Promise<void>;
+export interface ToolResult {
+    content: ToolContent[];
+    details?: Record<string, unknown>;
+    exitCode?: number;
+    passed?: boolean;
+    guidance?: string;
+    output?: string;
 }
 export interface ExtensionContext {
     cwd?: string;
@@ -19,8 +20,13 @@ export interface ExtensionContext {
     };
 }
 export interface PiAgentHost {
-    registerTool: (tool: ToolDefinition) => void;
-    registerCommand?: (command: CommandDefinition) => void;
+    registerTool: (tool: Record<string, unknown>) => void;
+    registerCommand?: (...args: unknown[]) => void;
     injectSystemPrompt?: (prompt: string) => void;
+    on?: (event: string, handler: (data: {
+        systemPrompt?: string | string[];
+    }) => {
+        systemPrompt?: string | string[];
+    } | void) => void;
 }
 export default function (pi: PiAgentHost): void;

@@ -2,22 +2,26 @@
   "name": "pi-habit-hooks",
   "version": "1.5.0",
   "type": "module",
-  "description": "Code-quality coaching engine translating lint violations into canonical smell vocabulary with AI coaching prompts",
+  "description": "Code-quality coaching engine translating lint violations into canonical smell vocabulary with AI coaching prompts — works with pi and oh-my-pi",
   "keywords": [
     "pi-package",
     "pi",
     "omp",
     "pi-extension",
     "rust",
-    "code-quality"
+    "code-quality",
+    "habit-hooks"
   ],
-  "dependencies": {
-    "jscpd": "^5.4.2"
-  },
-  "devDependencies": {
-    "@types/node": "^26.6.5",
-    "typescript": "^7.0.2"
-  },
+  "main": "./dist/extensions/index.js",
+  "types": "./dist/extensions/index.d.ts",
+  "files": [
+    "dist",
+    "extensions",
+    "skills",
+    "plugins",
+    "README.md",
+    "LICENSE"
+  ],
   "pi": {
     "extensions": [
       "./dist/extensions/index.js"
@@ -25,6 +29,37 @@
     "skills": [
       "./skills"
     ]
+  },
+  "omp": {
+    "extensions": [
+      "./dist/extensions/index.js"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "@earendil-works/pi-ai": {
+      "optional": true
+    },
+    "@earendil-works/pi-tui": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "jscpd": "^5.4.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
   },
   "scripts": {
     "build": "cargo build --release && tsc",
