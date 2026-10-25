@@ -89,6 +89,7 @@ pub fn evaluate_jq(
 mod tests {
     use super::*;
     use std::fs;
+    use std::path::PathBuf;
     use tempfile::tempdir;
 
     mod transform_evaluation {
@@ -139,6 +140,34 @@ mod tests {
                 TransformError::NotAnArray { .. } => {}
                 other => panic!("expected NotAnArray error, got {:?}", other),
             }
+        }
+
+        #[test]
+        fn verifies_clippy_jq_mappings_for_rust_skills_lints() {
+            let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            let clippy_jq = workspace.join("plugins").join("rust").join("clippy.jq");
+
+            let input = r#"[
+                {"code": "clippy::await_holding_lock", "filename": "src/async_mod.rs", "line": 20, "column": 5, "content": "state.lock()", "message": "lock held across await"},
+                {"code": "clippy::undocumented_unsafe_blocks", "filename": "src/ffi.rs", "line": 40, "column": 5, "content": "unsafe { ... }", "message": "undocumented unsafe"},
+                {"code": "clippy::unwrap_used", "filename": "src/main.rs", "line": 15, "column": 10, "content": "opt.unwrap()", "message": "unwrap used"},
+                {"code": "clippy::redundant_clone", "filename": "src/service.rs", "line": 35, "column": 8, "content": "data.clone()", "message": "redundant clone"},
+                {"code": "clippy::ptr_arg", "filename": "src/util.rs", "line": 50, "column": 12, "content": "v: &Vec<u8>", "message": "ptr arg"}
+            ]"#;
+
+            let findings = evaluate_jq(&clippy_jq, input).unwrap();
+            let reported_smells: Vec<&str> = findings.iter().map(|f| f.smell.as_str()).collect();
+
+            assert_eq!(reported_smells.contains(&"lock-across-await"), true);
+            assert_eq!(reported_smells.contains(&"undocumented-unsafe"), true);
+            assert_eq!(reported_smells.contains(&"unhandled-unwrap"), true);
+            assert_eq!(reported_smells.contains(&"redundant-clone"), true);
+            assert_eq!(reported_smells.contains(&"suboptimal-borrow-type"), true);
         }
     }
 }

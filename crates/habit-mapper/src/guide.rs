@@ -231,5 +231,48 @@ mod tests {
             assert_eq!(output.contains("⚠️ Habit Hooks: Incomplete Run"), true);
             assert_eq!(output.contains("sensor:clippy: compiler failed"), true);
         }
+
+        #[test]
+        fn renders_shipped_rust_guides_when_configured() {
+            let workspace = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            let rust_plugin_dir = workspace.join("plugins").join("rust");
+            let resolver = GuideResolver::new(&workspace, &[rust_plugin_dir], &BTreeMap::new());
+
+            let test_smells = [
+                ("lock-across-await", "lock across an `.await`"),
+                ("undocumented-unsafe", "Unsafe code blocks without explicit safety"),
+                ("unhandled-unwrap", "Bare `.unwrap()` or panic-inducing"),
+                ("redundant-clone", "Excessive or unnecessary `.clone()`"),
+                ("suboptimal-borrow-type", "concrete container references"),
+            ];
+
+            for (smell, expected_snippet) in test_smells {
+                let finding = Finding {
+                    smell: smell.to_string(),
+                    language: Some("rust".to_string()),
+                    details: serde_json::json!({}),
+                    issues: vec![Issue {
+                        key: "src/lib.rs".to_string(),
+                        details: IssueDetails {
+                            file: "src/lib.rs".to_string(),
+                            line: Some(10),
+                            column: Some(4),
+                            content: Some("code snippet".to_string()),
+                            message: Some("violation message".to_string()),
+                            source: Some("clippy".to_string()),
+                            extra: BTreeMap::new(),
+                        },
+                    }],
+                };
+
+                let rendered = resolver.render(&finding).unwrap();
+                assert_eq!(rendered.contains(expected_snippet), true);
+            }
+        }
     }
 }

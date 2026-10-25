@@ -160,6 +160,13 @@ impl SmellCatalogue {
     pub const INCOMPLETE_RUN: &'static str = "incomplete-run";
     pub const PARSE_ERROR: &'static str = "parse-error";
 
+    // New additions from rust-skills
+    pub const LOCK_ACROSS_AWAIT: &'static str = "lock-across-await";
+    pub const UNDOCUMENTED_UNSAFE: &'static str = "undocumented-unsafe";
+    pub const UNHANDLED_UNWRAP: &'static str = "unhandled-unwrap";
+    pub const REDUNDANT_CLONE: &'static str = "redundant-clone";
+    pub const SUBOPTIMAL_BORROW_TYPE: &'static str = "suboptimal-borrow-type";
+
     pub fn default_severity(smell: &str) -> Severity {
         match smell {
             Self::TOO_MANY_PARAMETERS
@@ -171,7 +178,9 @@ impl SmellCatalogue {
             | Self::SWALLOWED_EXCEPTION
             | Self::DUPLICATE_DEPENDENCY
             | Self::INCOMPLETE_RUN
-            | Self::PARSE_ERROR => Severity::Enforced,
+            | Self::PARSE_ERROR
+            | Self::LOCK_ACROSS_AWAIT
+            | Self::UNDOCUMENTED_UNSAFE => Severity::Enforced,
 
             Self::UNUSED_VARIABLE
             | Self::NON_CONST_BINDING
@@ -182,7 +191,10 @@ impl SmellCatalogue {
             | Self::TEST_ONLY_DEAD_CODE
             | Self::WARNING_COMMENT
             | Self::NON_ESSENTIAL_COMMENT
-            | Self::DUPLICATED_CODE => Severity::Suggested,
+            | Self::DUPLICATED_CODE
+            | Self::UNHANDLED_UNWRAP
+            | Self::REDUNDANT_CLONE
+            | Self::SUBOPTIMAL_BORROW_TYPE => Severity::Suggested,
 
             // Unknown / open-vocabulary smells default to Suggested unless configured otherwise
             _ => Severity::Suggested,
@@ -242,6 +254,30 @@ mod tests {
         fn rejects_invalid_severity_value() {
             let result: Result<Severity, _> = serde_json::from_str(r#""unknown""#);
             assert!(result.is_err());
+        }
+
+        #[test]
+        fn verifies_default_severity_for_new_smells() {
+            assert_eq!(
+                SmellCatalogue::default_severity(SmellCatalogue::LOCK_ACROSS_AWAIT),
+                Severity::Enforced
+            );
+            assert_eq!(
+                SmellCatalogue::default_severity(SmellCatalogue::UNDOCUMENTED_UNSAFE),
+                Severity::Enforced
+            );
+            assert_eq!(
+                SmellCatalogue::default_severity(SmellCatalogue::UNHANDLED_UNWRAP),
+                Severity::Suggested
+            );
+            assert_eq!(
+                SmellCatalogue::default_severity(SmellCatalogue::REDUNDANT_CLONE),
+                Severity::Suggested
+            );
+            assert_eq!(
+                SmellCatalogue::default_severity(SmellCatalogue::SUBOPTIMAL_BORROW_TYPE),
+                Severity::Suggested
+            );
         }
     }
 }

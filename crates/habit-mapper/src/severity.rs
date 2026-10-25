@@ -138,7 +138,9 @@ fn resolve_smell_severity(smell: &str, uncoached: UncoachedHandling) -> Option<S
         | SmellCatalogue::SWALLOWED_EXCEPTION
         | SmellCatalogue::DUPLICATE_DEPENDENCY
         | SmellCatalogue::INCOMPLETE_RUN
-        | SmellCatalogue::PARSE_ERROR => Some(Severity::Enforced),
+        | SmellCatalogue::PARSE_ERROR
+        | SmellCatalogue::LOCK_ACROSS_AWAIT
+        | SmellCatalogue::UNDOCUMENTED_UNSAFE => Some(Severity::Enforced),
 
         SmellCatalogue::UNUSED_VARIABLE
         | SmellCatalogue::NON_CONST_BINDING
@@ -149,7 +151,10 @@ fn resolve_smell_severity(smell: &str, uncoached: UncoachedHandling) -> Option<S
         | SmellCatalogue::TEST_ONLY_DEAD_CODE
         | SmellCatalogue::WARNING_COMMENT
         | SmellCatalogue::NON_ESSENTIAL_COMMENT
-        | SmellCatalogue::DUPLICATED_CODE => Some(Severity::Suggested),
+        | SmellCatalogue::DUPLICATED_CODE
+        | SmellCatalogue::UNHANDLED_UNWRAP
+        | SmellCatalogue::REDUNDANT_CLONE
+        | SmellCatalogue::SUBOPTIMAL_BORROW_TYPE => Some(Severity::Suggested),
 
         _ => match uncoached {
             UncoachedHandling::Ignore => None,
