@@ -1,4 +1,7 @@
-/target
-/node_modules
-/.habit-hooks/target
+target/
+**/target/
+node_modules/
+**/node_modules/
+.habit-hooks/target/
+**/.habit-hooks/target/
 .DS_Store
