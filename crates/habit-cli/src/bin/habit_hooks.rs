@@ -4,7 +4,7 @@ use habit_mapper::evaluate_and_render;
 use habit_sensors::{detector::DetectorResolver, runner::SensorRunner, scope::ScopeArgs};
 use habit_snooze::{filter_snoozed_findings, load_snooze_file};
 use std::fs;
-use std::process;
+use std::process::{self, Command, Stdio};
 
 #[derive(Parser, Debug)]
 #[command(name = "habit-hooks", about = "Habit Hooks Code Quality Coaching Engine")]
@@ -41,10 +41,12 @@ struct Cli {
 enum Commands {
     #[command(about = "Initialize Habit Hooks configuration and verify tools")]
     Init,
-    #[command(about = "Install Git pre-commit hook into .git/hooks/pre-commit")]
-    Install,
+    #[command(about = "Install Git pre-commit hook into .git/hooks/pre-commit and/or configure with hk")]
+    Install {
+        #[arg(long, help = "Configure pre-commit hook using hk (https://hk.jdx.dev)")]
+        hk: bool,
+    },
 }
-
 fn main() {
     let cli = Cli::parse();
     let project_dir = find_project_dir();
@@ -53,8 +55,8 @@ fn main() {
         run_init(&project_dir);
         return;
     }
-    if let Some(Commands::Install) = cli.command {
-        if let Err(err) = run_install(&project_dir) {
+    if let Some(Commands::Install { hk }) = cli.command {
+        if let Err(err) = run_install(&project_dir, hk) {
             eprintln!("habit-hooks: {err}");
             process::exit(1);
         }
@@ -185,10 +187,91 @@ mainBranch = "main"
     }
 }
 
-fn run_install(project_dir: &std::path::Path) -> Result<(), String> {
+fn configure_hk_step(project_dir: &std::path::Path) -> Result<bool, String> {
+    let hk_pkl_path = project_dir.join("hk.pkl");
+    let step_snippet = r#"    ["habit-hooks"] {
+        glob = "**/*.rs"
+        check = "habit-hooks --changed"
+    }"#;
+
+    if hk_pkl_path.is_file() {
+        let content = fs::read_to_string(&hk_pkl_path)
+            .map_err(|e| format!("Failed to read existing hk.pkl: {e}"))?;
+        if content.contains("[\"habit-hooks\"]") || content.contains("[habit-hooks]") {
+            println!("ℹ️  Step 'habit-hooks' already configured in hk.pkl");
+        } else if let Some(steps_idx) = content.find("steps {") {
+            let insert_pos = steps_idx + "steps {".len();
+            let mut updated = content[..insert_pos].to_string();
+            updated.push('\n');
+            updated.push_str(step_snippet);
+            updated.push_str(&content[insert_pos..]);
+            fs::write(&hk_pkl_path, updated)
+                .map_err(|e| format!("Failed to update hk.pkl with habit-hooks step: {e}"))?;
+            println!("✅ Added 'habit-hooks' step to existing hk.pkl");
+        } else {
+            // Append steps block
+            let mut updated = content;
+            if !updated.ends_with('\n') {
+                updated.push('\n');
+            }
+            updated.push_str("\nsteps {\n");
+            updated.push_str(step_snippet);
+            updated.push_str("\n}\n");
+            fs::write(&hk_pkl_path, updated)
+                .map_err(|e| format!("Failed to update hk.pkl with habit-hooks step: {e}"))?;
+            println!("✅ Appended 'habit-hooks' step to existing hk.pkl");
+        }
+    } else {
+        let starter = format!(
+            r#"amends "package://github.com/jdx/hk/releases/download/v2.0.0/hk@2.0.0#/Config.pkl"
+
+steps {{
+{step_snippet}
+}}
+"#
+        );
+        fs::write(&hk_pkl_path, starter)
+            .map_err(|e| format!("Failed to create hk.pkl: {e}"))?;
+        println!("✅ Created hk.pkl with 'habit-hooks' step");
+    }
+
+    // If hk is available on PATH, run `hk install` to register hook via git config
+    let hk_check = Command::new("hk")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    if let Ok(status) = hk_check {
+        if status.success() {
+            let install_status = Command::new("hk")
+                .arg("install")
+                .current_dir(project_dir)
+                .status()
+                .map_err(|e| format!("Failed to run 'hk install': {e}"))?;
+            if install_status.success() {
+                println!("✅ Ran 'hk install' to register Git hooks with hk");
+                return Ok(true);
+            } else {
+                eprintln!("⚠️  'hk install' exited with non-zero status");
+            }
+        }
+    } else {
+        println!("ℹ️  'hk' CLI not found on PATH; created/updated hk.pkl. Install hk (https://hk.jdx.dev) to enable.");
+    }
+
+    Ok(false)
+}
+
+fn run_install(project_dir: &std::path::Path, force_hk: bool) -> Result<(), String> {
     let git_dir = project_dir.join(".git");
     if !git_dir.exists() {
         return Err("Not a git repository".to_string());
+    }
+
+    let hk_detected = force_hk || project_dir.join("hk.pkl").is_file();
+    if hk_detected {
+        configure_hk_step(project_dir)?;
     }
 
     let hooks_dir = git_dir.join("hooks");
@@ -198,11 +281,13 @@ fn run_install(project_dir: &std::path::Path) -> Result<(), String> {
 
     let pre_commit_path = hooks_dir.join("pre-commit");
     let script = r#"#!/bin/sh
-# Habit Hooks automated pre-commit gate
-if command -v habit-hooks >/dev/null 2>&1; then
+# Habit Hooks automated pre-commit gate (supports hk https://hk.jdx.dev)
+if command -v hk >/dev/null 2>&1 && [ -f hk.pkl ]; then
+    exec hk run pre-commit --from-hook
+elif command -v habit-hooks >/dev/null 2>&1; then
     exec habit-hooks --changed
 else
-    echo "⚠️ habit-hooks not found in PATH; skipping pre-commit gate."
+    echo "⚠️ Neither hk nor habit-hooks found in PATH; skipping pre-commit gate."
 fi
 "#;
 

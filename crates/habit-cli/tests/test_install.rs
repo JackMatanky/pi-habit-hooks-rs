@@ -157,3 +157,66 @@ changedOnly = true
         "pre-commit hook output did not reflect enforced smell failure"
     );
 }
+
+#[test]
+fn test_install_with_hk_flag_creates_hk_pkl() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::create_dir_all(path.join(".git")).unwrap();
+
+    let habit_hooks_bin = env!("CARGO_BIN_EXE_habit-hooks");
+    let output = Command::new(habit_hooks_bin)
+        .args(&["install", "--hk"])
+        .current_dir(path)
+        .output()
+        .expect("failed to execute habit-hooks install --hk");
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("hk.pkl"));
+
+    let hk_pkl = path.join("hk.pkl");
+    assert!(hk_pkl.is_file());
+    let content = fs::read_to_string(&hk_pkl).unwrap();
+    assert!(content.contains("[\"habit-hooks\"]"));
+    assert!(content.contains("glob = \"**/*.rs\""));
+    assert!(content.contains("check = \"habit-hooks --changed\""));
+
+    let hook_file = path.join(".git").join("hooks").join("pre-commit");
+    assert!(hook_file.is_file());
+    let hook_content = fs::read_to_string(&hook_file).unwrap();
+    assert!(hook_content.contains("hk run pre-commit --from-hook"));
+}
+
+#[test]
+fn test_install_auto_detects_existing_hk_pkl() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    fs::create_dir_all(path.join(".git")).unwrap();
+
+    // Pre-create an existing hk.pkl with dummy steps
+    let existing_hk_pkl = r#"amends "package://github.com/jdx/hk/releases/download/v2.0.0/hk@2.0.0#/Config.pkl"
+
+steps {
+    ["prettier"] {
+        glob = "**/*.json"
+        check = "prettier --check {{files}}"
+    }
+}
+"#;
+    fs::write(path.join("hk.pkl"), existing_hk_pkl).unwrap();
+
+    let habit_hooks_bin = env!("CARGO_BIN_EXE_habit-hooks");
+    // Run without --hk flag
+    let output = Command::new(habit_hooks_bin)
+        .arg("install")
+        .current_dir(path)
+        .output()
+        .expect("failed to execute habit-hooks install");
+
+    assert!(output.status.success());
+    let hk_pkl = path.join("hk.pkl");
+    let content = fs::read_to_string(&hk_pkl).unwrap();
+    assert!(content.contains("[\"habit-hooks\"]"));
+    assert!(content.contains("[\"prettier\"]"));
+}
