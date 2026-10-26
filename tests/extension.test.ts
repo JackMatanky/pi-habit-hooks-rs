@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { resolveBinary, runHabitHooks, runHabitSnooze } from "../extensions/runner.js";
 import registerExtension, { validateUnwrapWithLaya } from "../extensions/index.js";
 
@@ -49,7 +52,7 @@ test("registers tools and commands with host", () => {
   const toolNames = registeredTools.map((t) => t.name);
   assert.deepEqual(toolNames, ["habit_hooks", "habit_snooze"]);
   assert.deepEqual(registeredCommands, ["habit-hooks", "snooze"]);
-  assert.equal(promptInjected, true);
+  assert.equal(promptInjected, false);
 
   // Verify both execute and handler exist on registered tools
   for (const t of registeredTools) {
@@ -123,24 +126,44 @@ test("lifecycle: tool_call ignores non-rust files", async () => {
   assert.equal(statusUpdates.length, 0);
 });
 
-test("lifecycle: turn_end pre-yield gate skips non-rust projects", async () => {
-  const handlers: Record<string, Array<Function>> = {};
+test("lifecycle: no automatic coaching in a project without Rust files", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "habit-hooks-non-rust-"));
+  try {
+    writeFileSync(join(cwd, "Cargo.toml"), "[workspace]\n");
+    writeFileSync(join(cwd, "README.md"), "no Rust sources here\n");
+    mkdirSync(join(cwd, "target"));
+    writeFileSync(join(cwd, "target", "ignored.rs"), "not project source\n");
+    const handlers: Record<string, Function[]> = {};
+    const statuses: string[] = [];
+    const host = {
+      registerTool: () => {},
+      injectSystemPrompt: () => { throw new Error("unconditional prompt injection"); },
+      ui: {
+        setStatus: (_key: string, value: string | { text: string } | undefined) => {
+          statuses.push(typeof value === "object" ? value?.text ?? "" : value ?? "");
+        },
+      },
+      on: (event: string, handler: Function) => {
+        handlers[event] = handlers[event] || [];
+        handlers[event].push(handler);
+      },
+    };
+    registerExtension(host);
 
-  const mockPi = {
-    registerTool: () => {},
-    on: (event: string, handler: Function) => {
-      handlers[event] = handlers[event] || [];
-      handlers[event].push(handler);
-    },
-  };
+    assert.equal(handlers["before_agent_start"][0]({ systemPrompt: ["Base"] }, { cwd }), undefined);
+    assert.deepEqual(handlers["turn_end"][0]({ cwd }), { interrupt: false });
+    assert.deepEqual(handlers["before_yield"][0]({ cwd }), { interrupt: false });
+    assert.deepEqual(handlers["session_stop"][0]({ cwd }), { interrupt: false });
+    assert.equal(await handlers["tool_call"][0]({ tool: "edit", params: { path: "target/ignored.rs" } }, { cwd }), undefined);
+    assert.deepEqual(statuses, []);
 
-  registerExtension(mockPi);
-  assert.ok(handlers["turn_end"] && handlers["turn_end"].length > 0);
-
-  const turnEndHandler = handlers["turn_end"][0];
-  // In a directory without Cargo.toml (e.g. /tmp)
-  const res = await turnEndHandler({ cwd: "/tmp" });
-  assert.deepEqual(res, { interrupt: false });
+    mkdirSync(join(cwd, "src"));
+    writeFileSync(join(cwd, "src", "main.rs"), "fn main() {}\n");
+    const prompted = handlers["before_agent_start"][0]({ systemPrompt: ["Base"] }, { cwd });
+    assert.ok(prompted.systemPrompt.some((p: string) => p.includes("Habit Hooks Quality Coaching Rules")));
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 test("lifecycle: turn_end pre-yield gate passes cleanly or interrupts on smell", async () => {
@@ -292,8 +315,9 @@ test("compatibility: works with Oh My Pi (OMP) host environment", async () => {
   assert.ok(commands["habit-hooks"]);
   assert.ok(commands["snooze"]);
 
-  // 4. Direct system prompt injection
-  assert.ok(injectedPrompt.includes("Habit Hooks Quality Coaching Rules"));
+  // Direct injection is global; OMP receives project-scoped guidelines via before_agent_start.
+  assert.equal(injectedPrompt, "");
+  assert.ok(handlers["before_agent_start"][0]({ systemPrompt: "Base" }, { cwd: process.cwd() }).systemPrompt.includes("Habit Hooks Quality Coaching Rules"));
 
   // 5. OMP before_yield and session_stop event hooks
   assert.ok(handlers["before_yield"]);

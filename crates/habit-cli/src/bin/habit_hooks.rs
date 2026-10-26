@@ -30,6 +30,8 @@ struct Cli {
     #[arg(long, help = "Scan working tree modified files")]
     changed: bool,
 
+    #[arg(long, help = "Scan staged Rust files (for pre-commit hooks)")]
+    staged: bool,
     #[arg(long = "no-snooze", help = "Do not filter out snoozed issues")]
     no_snooze: bool,
 
@@ -66,9 +68,39 @@ fn main() {
     let project_config = load_project_config(&project_dir);
     let plugins = load_enabled_plugins(&project_dir, &project_config);
 
+    let files = if cli.staged {
+        let output = Command::new("git")
+            .current_dir(&project_dir)
+            .args(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR", "--", "*.rs"])
+            .output()
+            .unwrap_or_else(|err| {
+                eprintln!("habit-hooks: failed to list staged Rust files: {err}");
+                process::exit(1);
+            });
+        if !output.status.success() {
+            eprintln!(
+                "habit-hooks: failed to list staged Rust files: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            process::exit(1);
+        }
+        let files: Vec<String> = output
+            .stdout
+            .split(|byte| *byte == 0)
+            .filter(|name| !name.is_empty())
+            .map(|name| String::from_utf8_lossy(name).into_owned())
+            .collect();
+        if files.is_empty() {
+            return;
+        }
+        files
+    } else {
+        cli.files
+    };
+
     let scope_args = ScopeArgs {
         all: cli.all,
-        files: cli.files,
+        files,
         branch: cli.branch,
         since: cli.since,
         last: cli.last,
@@ -191,14 +223,29 @@ fn configure_hk_step(project_dir: &std::path::Path) -> Result<bool, String> {
     let hk_pkl_path = project_dir.join("hk.pkl");
     let step_snippet = r#"    ["habit-hooks"] {
         glob = "**/*.rs"
-        check = "habit-hooks --changed"
+        check = "habit-hooks --staged"
     }"#;
 
     if hk_pkl_path.is_file() {
         let content = fs::read_to_string(&hk_pkl_path)
             .map_err(|e| format!("Failed to read existing hk.pkl: {e}"))?;
-        if content.contains("[\"habit-hooks\"]") || content.contains("[habit-hooks]") {
+        if content.contains(step_snippet) {
             println!("ℹ️  Step 'habit-hooks' already configured in hk.pkl");
+        } else if content.contains(
+            "    [\"habit-hooks\"] {\n        glob = \"**/*.rs\"\n        check = \"habit-hooks --changed\"\n    }",
+        ) {
+            fs::write(
+                &hk_pkl_path,
+                content.replacen(
+                    "    [\"habit-hooks\"] {\n        glob = \"**/*.rs\"\n        check = \"habit-hooks --changed\"\n    }",
+                    step_snippet,
+                    1,
+                ),
+            )
+            .map_err(|e| format!("Failed to update hk.pkl with staged scope: {e}"))?;
+            println!("✅ Updated 'habit-hooks' step to scan staged Rust files");
+        } else if content.contains("[\"habit-hooks\"]") || content.contains("[habit-hooks]") {
+            return Err("Existing 'habit-hooks' step in hk.pkl is customized; update its check command to 'habit-hooks --staged' manually".to_string());
         } else if let Some(steps_idx) = content.find("steps {") {
             let insert_pos = steps_idx + "steps {".len();
             let mut updated = content[..insert_pos].to_string();
@@ -269,40 +316,51 @@ fn run_install(project_dir: &std::path::Path, force_hk: bool) -> Result<(), Stri
         return Err("Not a git repository".to_string());
     }
 
+    let pre_commit_path = git_dir.join("hooks/pre-commit");
+    if pre_commit_path.exists() {
+        let existing = fs::read_to_string(&pre_commit_path)
+            .map_err(|e| format!("Failed to read existing pre-commit hook: {e}"))?;
+        if !existing.starts_with("#!/bin/sh\n# Habit Hooks automated pre-commit gate") {
+            return Err(format!(
+                "Existing pre-commit hook at {} is not managed by Habit Hooks; refusing to overwrite it",
+                pre_commit_path.display()
+            ));
+        }
+    }
+
     let hk_detected = force_hk || project_dir.join("hk.pkl").is_file();
-    if hk_detected {
-        configure_hk_step(project_dir)?;
+    if hk_detected && configure_hk_step(project_dir)? {
+        return Ok(());
     }
 
     let hooks_dir = git_dir.join("hooks");
-    if let Err(err) = fs::create_dir_all(&hooks_dir) {
-        return Err(format!("Failed to create .git/hooks directory: {err}"));
-    }
+    fs::create_dir_all(&hooks_dir)
+        .map_err(|err| format!("Failed to create .git/hooks directory: {err}"))?;
 
-    let pre_commit_path = hooks_dir.join("pre-commit");
     let script = r#"#!/bin/sh
-# Habit Hooks automated pre-commit gate (supports hk https://hk.jdx.dev)
-if command -v hk >/dev/null 2>&1 && [ -f hk.pkl ]; then
-    exec hk run pre-commit --from-hook
-elif command -v habit-hooks >/dev/null 2>&1; then
-    exec habit-hooks --changed
+# Habit Hooks automated pre-commit gate
+if git diff --cached --quiet --diff-filter=ACMR -- '*.rs'; then
+    exit 0
+fi
+if command -v habit-hooks >/dev/null 2>&1; then
+    exec habit-hooks --staged
 else
-    echo "⚠️ Neither hk nor habit-hooks found in PATH; skipping pre-commit gate."
+    echo "⚠️ habit-hooks not found in PATH; skipping pre-commit gate."
 fi
 "#;
 
-    if let Err(err) = fs::write(&pre_commit_path, script) {
-        return Err(format!("Failed to write pre-commit hook: {err}"));
-    }
+    fs::write(&pre_commit_path, script)
+        .map_err(|err| format!("Failed to write pre-commit hook: {err}"))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::metadata(&pre_commit_path) {
-            let mut perms = metadata.permissions();
-            perms.set_mode(0o755);
-            let _ = fs::set_permissions(&pre_commit_path, perms);
-        }
+        let mut perms = fs::metadata(&pre_commit_path)
+            .map_err(|err| format!("Failed to read pre-commit hook permissions: {err}"))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&pre_commit_path, perms)
+            .map_err(|err| format!("Failed to make pre-commit hook executable: {err}"))?;
     }
 
     println!("✅ Installed Habit Hooks pre-commit hook in .git/hooks/pre-commit");

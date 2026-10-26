@@ -1,5 +1,6 @@
 use std::fs;
 use std::process::Command;
+use pretty_assertions::assert_eq;
 use tempfile::tempdir;
 
 #[test]
@@ -7,8 +8,7 @@ fn test_install_pre_commit_hook() {
     let dir = tempdir().unwrap();
     let path = dir.path();
 
-    // Create a mock .git directory
-    fs::create_dir_all(path.join(".git")).unwrap();
+    git(path, &["init", "-b", "main"]);
 
     // Run habit-hooks install in that dir
     let habit_hooks_bin = env!("CARGO_BIN_EXE_habit-hooks");
@@ -27,7 +27,7 @@ fn test_install_pre_commit_hook() {
 
     let content = fs::read_to_string(&hook_file).unwrap();
     assert!(content.contains("# Habit Hooks automated pre-commit gate"));
-    assert!(content.contains("exec habit-hooks --changed"));
+    assert!(content.contains("exec habit-hooks --staged"));
 
     #[cfg(unix)]
     {
@@ -159,15 +159,19 @@ changedOnly = true
 }
 
 #[test]
+#[cfg(unix)]
 fn test_install_with_hk_flag_creates_hk_pkl() {
     let dir = tempdir().unwrap();
     let path = dir.path();
-    fs::create_dir_all(path.join(".git")).unwrap();
+    git(path, &["init", "-b", "main"]);
 
-    let habit_hooks_bin = env!("CARGO_BIN_EXE_habit-hooks");
-    let output = Command::new(habit_hooks_bin)
-        .args(&["install", "--hk"])
+    let fake_bin = path.join("bin");
+    fs::create_dir(&fake_bin).unwrap();
+    fake_hk(&fake_bin, false);
+    let output = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+        .args(["install", "--hk"])
         .current_dir(path)
+        .env("PATH", path_with_bin(&fake_bin))
         .output()
         .expect("failed to execute habit-hooks install --hk");
 
@@ -180,19 +184,20 @@ fn test_install_with_hk_flag_creates_hk_pkl() {
     let content = fs::read_to_string(&hk_pkl).unwrap();
     assert!(content.contains("[\"habit-hooks\"]"));
     assert!(content.contains("glob = \"**/*.rs\""));
-    assert!(content.contains("check = \"habit-hooks --changed\""));
+    assert!(content.contains("check = \"habit-hooks --staged\""));
 
-    let hook_file = path.join(".git").join("hooks").join("pre-commit");
-    assert!(hook_file.is_file());
-    let hook_content = fs::read_to_string(&hook_file).unwrap();
-    assert!(hook_content.contains("hk run pre-commit --from-hook"));
+    assert!(path.join(".git/hooks/pre-commit").is_file());
+    assert!(fs::read_to_string(path.join(".git/hooks/pre-commit"))
+        .unwrap()
+        .contains("exec habit-hooks --staged"));
 }
 
 #[test]
+#[cfg(unix)]
 fn test_install_auto_detects_existing_hk_pkl() {
     let dir = tempdir().unwrap();
     let path = dir.path();
-    fs::create_dir_all(path.join(".git")).unwrap();
+    git(path, &["init", "-b", "main"]);
 
     // Pre-create an existing hk.pkl with dummy steps
     let existing_hk_pkl = r#"amends "package://github.com/jdx/hk/releases/download/v2.0.0/hk@2.0.0#/Config.pkl"
@@ -206,11 +211,13 @@ steps {
 "#;
     fs::write(path.join("hk.pkl"), existing_hk_pkl).unwrap();
 
-    let habit_hooks_bin = env!("CARGO_BIN_EXE_habit-hooks");
-    // Run without --hk flag
-    let output = Command::new(habit_hooks_bin)
+    let fake_bin = path.join("bin");
+    fs::create_dir(&fake_bin).unwrap();
+    fake_hk(&fake_bin, false);
+    let output = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
         .arg("install")
         .current_dir(path)
+        .env("PATH", path_with_bin(&fake_bin))
         .output()
         .expect("failed to execute habit-hooks install");
 
@@ -219,4 +226,232 @@ steps {
     let content = fs::read_to_string(&hk_pkl).unwrap();
     assert!(content.contains("[\"habit-hooks\"]"));
     assert!(content.contains("[\"prettier\"]"));
+}
+
+#[test]
+#[cfg(unix)]
+fn upgrades_legacy_hk_step_to_staged_command() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    git(path, &["init", "-b", "main"]);
+    fs::write(
+        path.join("hk.pkl"),
+        "amends \"package://github.com/jdx/hk/releases/download/v2.0.0/hk@2.0.0#/Config.pkl\"\n\nsteps {\n    [\"habit-hooks\"] {\n        glob = \"**/*.rs\"\n        check = \"habit-hooks --changed\"\n    }\n}\n",
+    )
+    .unwrap();
+
+    let bin = path.join("bin");
+    fs::create_dir(&bin).unwrap();
+    fake_hk(&bin, false);
+    let output = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+        .arg("install")
+        .current_dir(path)
+        .env("PATH", path_with_bin(&bin))
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let content = fs::read_to_string(path.join("hk.pkl")).unwrap();
+    assert!(content.contains("check = \"habit-hooks --staged\""));
+    assert!(!content.contains("--changed"));
+}
+
+fn git(path: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git").current_dir(path).args(args).output().unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn path_with_bin(bin: &std::path::Path) -> std::ffi::OsString {
+    std::env::join_paths(
+        std::iter::once(bin.to_path_buf()).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap()
+}
+
+#[cfg(unix)]
+fn executable(path: &std::path::Path, script: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    fs::write(path, script).unwrap();
+    let mut permissions = fs::metadata(path).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(path, permissions).unwrap();
+}
+
+#[cfg(unix)]
+fn fake_hk(bin: &std::path::Path, active: bool) {
+    let script = if active {
+        r#"#!/bin/sh
+case "$1" in
+    --version) exit 0 ;;
+    install)
+        mkdir -p .hk-hooks
+        printf '#!/bin/sh\nexec hk run pre-commit --from-hook\n' > .hk-hooks/pre-commit
+        chmod +x .hk-hooks/pre-commit
+        git config core.hooksPath .hk-hooks
+        ;;
+    run)
+        if git diff --cached --quiet --diff-filter=ACMR -- '*.rs'; then exit 0; fi
+        exec habit-hooks --staged
+        ;;
+esac
+"#
+    } else {
+        "#!/bin/sh\nexit 1\n"
+    };
+    executable(&bin.join("hk"), script);
+}
+
+#[cfg(unix)]
+#[test]
+fn skips_native_hook_when_commit_has_no_staged_rust() {
+    for has_rust in [false, true] {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+        git(path, &["init", "-b", "main"]);
+        git(path, &["config", "user.name", "Test Runner"]);
+        git(path, &["config", "user.email", "test@runner.local"]);
+        fs::write(path.join("Cargo.toml"), "[package]\nname = \"sample\"\n").unwrap();
+        if has_rust {
+            fs::create_dir(path.join("src")).unwrap();
+            fs::write(path.join("src/lib.rs"), "pub fn sample() {}\n").unwrap();
+        }
+        git(path, &["add", "."]);
+        git(path, &["commit", "-m", "baseline"]);
+
+        let bin = path.join("bin");
+        fs::create_dir(&bin).unwrap();
+        executable(
+            &bin.join("habit-hooks"),
+            "#!/bin/sh\necho \"$*\" >> hook-invocations\nexit 1\n",
+        );
+        let installed = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+            .arg("install")
+            .current_dir(path)
+            .output()
+            .unwrap();
+        assert!(installed.status.success());
+
+        fs::write(path.join("Cargo.toml"), "[package]\nname = \"changed\"\n").unwrap();
+        fs::write(path.join("README.txt"), "plain text\n").unwrap();
+        if has_rust {
+            fs::write(path.join("src/lib.rs"), "pub fn unstaged() {}\n").unwrap();
+        }
+        git(path, &["add", "Cargo.toml", "README.txt"]);
+        let commit = Command::new("git")
+            .current_dir(path)
+            .args(["commit", "-m", "non-rust changes"])
+            .env("PATH", path_with_bin(&bin))
+            .output()
+            .unwrap();
+        assert!(
+            commit.status.success(),
+            "{}",
+            String::from_utf8_lossy(&commit.stderr)
+        );
+        assert!(!path.join("hook-invocations").exists());
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn invokes_native_hook_once_for_staged_rust() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    git(path, &["init", "-b", "main"]);
+    git(path, &["config", "user.name", "Test Runner"]);
+    git(path, &["config", "user.email", "test@runner.local"]);
+    let bin = path.join("bin");
+    fs::create_dir(&bin).unwrap();
+    executable(
+        &bin.join("habit-hooks"),
+        "#!/bin/sh\necho \"$*\" >> hook-invocations\n",
+    );
+    let installed = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+        .arg("install")
+        .current_dir(path)
+        .output()
+        .unwrap();
+    assert!(installed.status.success());
+
+    fs::write(path.join("root.rs"), "fn main() {}\n").unwrap();
+    fs::write(path.join("README.txt"), "plain text\n").unwrap();
+    git(path, &["add", "root.rs", "README.txt"]);
+    let commit = Command::new("git")
+        .current_dir(path)
+        .args(["commit", "-m", "rust changes"])
+        .env("PATH", path_with_bin(&bin))
+        .output()
+        .unwrap();
+    assert!(commit.status.success(), "{}", String::from_utf8_lossy(&commit.stderr));
+    assert_eq!(fs::read_to_string(path.join("hook-invocations")).unwrap(), "--staged\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn routes_hk_commit_once_without_native_duplicate() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    git(path, &["init", "-b", "main"]);
+    git(path, &["config", "user.name", "Test Runner"]);
+    git(path, &["config", "user.email", "test@runner.local"]);
+    let bin = path.join("bin");
+    fs::create_dir(&bin).unwrap();
+    fake_hk(&bin, true);
+    executable(
+        &bin.join("habit-hooks"),
+        "#!/bin/sh\necho \"$*\" >> hook-invocations\n",
+    );
+    let installed = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+        .args(["install", "--hk"])
+        .current_dir(path)
+        .env("PATH", path_with_bin(&bin))
+        .output()
+        .unwrap();
+    assert!(installed.status.success(), "{}", String::from_utf8_lossy(&installed.stderr));
+    assert!(!path.join(".git/hooks/pre-commit").exists());
+
+    fs::write(path.join("Cargo.toml"), "[package]\nname = \"sample\"\n").unwrap();
+    git(path, &["add", "Cargo.toml"]);
+    let commit = Command::new("git")
+        .current_dir(path)
+        .args(["commit", "-m", "cargo only"])
+        .env("PATH", path_with_bin(&bin))
+        .output()
+        .unwrap();
+    assert!(commit.status.success(), "{}", String::from_utf8_lossy(&commit.stderr));
+    assert!(!path.join("hook-invocations").exists());
+
+    fs::write(path.join("root.rs"), "fn main() {}\n").unwrap();
+    git(path, &["add", "root.rs"]);
+    let commit = Command::new("git")
+        .current_dir(path)
+        .args(["commit", "-m", "root-level rust"])
+        .env("PATH", path_with_bin(&bin))
+        .output()
+        .unwrap();
+    assert!(commit.status.success(), "{}", String::from_utf8_lossy(&commit.stderr));
+    assert_eq!(fs::read_to_string(path.join("hook-invocations")).unwrap(), "--staged\n");
+}
+
+#[test]
+fn rejects_install_when_foreign_hook_exists() {
+    let dir = tempdir().unwrap();
+    let path = dir.path();
+    git(path, &["init", "-b", "main"]);
+    let hook = path.join(".git/hooks/pre-commit");
+    fs::write(&hook, "#!/bin/sh\necho custom\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_habit-hooks"))
+        .args(["install", "--hk"])
+        .current_dir(path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert_eq!(fs::read_to_string(&hook).unwrap(), "#!/bin/sh\necho custom\n");
+    assert!(!path.join("hk.pkl").exists());
 }

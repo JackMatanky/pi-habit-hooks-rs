@@ -1,9 +1,40 @@
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { runHabitHooks, runHabitSnooze } from "./runner.js";
+function hasRustFiles(root) {
+    if (!fs.existsSync(path.join(root, "Cargo.toml")))
+        return false;
+    const dirs = [root];
+    while (dirs.length) {
+        const dir = dirs.pop();
+        let entries;
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            continue;
+        }
+        for (const entry of entries) {
+            if (entry.isFile() && entry.name.endsWith(".rs"))
+                return true;
+            if (entry.isDirectory() && ![".git", ".habit-hooks", "target", "node_modules"].includes(entry.name)) {
+                dirs.push(path.join(dir, entry.name));
+            }
+        }
+    }
+    return false;
+}
+function hasChangedRustFiles(cwd) {
+    const status = spawnSync("git", ["status", "--porcelain", "-z", "--untracked-files=all", "--", "*.rs"], {
+        cwd,
+        encoding: "utf-8",
+    });
+    return status.status !== 0 || status.stdout.length > 0;
+}
 const SYSTEM_GUIDELINES = `
 ## Habit Hooks Quality Coaching Rules
-1. Before completing any non-trivial code modification turn, run 'habit_hooks' to ensure no code smells were introduced.
+1. Before completing a turn that modifies Rust source files, run 'habit_hooks' to ensure no code smells were introduced.
 2. If violations are reported, refactor the code according to the outcome-oriented guidance before yielding.
 3. If suppression is strictly necessary (e.g. FFI boundary), always use scoped '#[expect(lint, reason = "...")]' with an explicit technical justification. NEVER use '#![allow(...)]' at the crate or module level.
 4. If a smell cannot be immediately refactored, use 'habit_snooze' with an explicit reason. Note that snoozes lapse automatically whenever the affected file is modified.
@@ -38,9 +69,7 @@ export default function (pi) {
     pi.registerTool({
         name: "habit_hooks",
         label: "Habit Hooks",
-        description: "Run Habit Hooks code-quality coaching engine over current working changes, staged changes, or entire codebase. Translates linter and AST findings into canonical smell coaching prompts.",
-        promptSnippet: "Run Habit Hooks to analyze code quality and get outcome-oriented coaching prompts for detected code smells.",
-        promptGuidelines: SYSTEM_GUIDELINES.split("\n").filter((l) => l.trim().length > 0),
+        description: "Run Habit Hooks Rust code-quality coaching over current working changes, staged changes, or the entire codebase.",
         parameters: {
             type: "object",
             properties: {
@@ -219,9 +248,12 @@ export default function (pi) {
             context?.ui?.log?.(result.output);
         });
     }
-    // 4. Inject System Prompt Guidelines (supports both event-based and direct call)
+    // Only introduce automatic coaching instructions in an active Rust project.
     if (typeof pi.on === "function") {
-        pi.on("before_agent_start", (event) => {
+        pi.on("before_agent_start", (event, ctx) => {
+            const cwd = ctx?.cwd ?? event?.cwd ?? process.cwd();
+            if (!hasRustFiles(cwd))
+                return;
             const prompt = event.systemPrompt;
             if (Array.isArray(prompt)) {
                 if (!prompt.some((b) => b.includes("Habit Hooks Quality Coaching Rules"))) {
@@ -248,7 +280,9 @@ export default function (pi) {
             const isTargetLang = /\.rs$/i.test(filePath);
             if (isEditOrWrite && isTargetLang) {
                 const ctx = ctxArg ?? data?.ctx;
-                const cwd = ctx?.cwd;
+                const cwd = ctx?.cwd ?? data?.cwd ?? process.cwd();
+                if (!hasRustFiles(cwd))
+                    return;
                 const result = runHabitHooks({ scope: "working", files: [filePath], cwd });
                 const smellHeaders = (result.output.match(/^###\s+[a-z0-9-]+/gm) || []).length;
                 const count = smellHeaders > 0 ? smellHeaders : (result.passed ? 0 : 1);
@@ -268,7 +302,7 @@ export default function (pi) {
         const preYieldGateHandler = (data, ctxArg) => {
             const ctx = ctxArg ?? data?.ctx;
             const cwd = ctx?.cwd ?? data?.cwd ?? process.cwd();
-            if (!fs.existsSync(path.join(cwd, "Cargo.toml"))) {
+            if (!hasRustFiles(cwd) || !hasChangedRustFiles(cwd)) {
                 return { interrupt: false };
             }
             const result = runHabitHooks({ scope: "working", cwd });
@@ -286,8 +320,5 @@ export default function (pi) {
         pi.on("turn_end", preYieldGateHandler);
         pi.on("before_yield", preYieldGateHandler);
         pi.on("session_stop", preYieldGateHandler);
-    }
-    if (typeof pi.injectSystemPrompt === "function") {
-        pi.injectSystemPrompt(SYSTEM_GUIDELINES);
     }
 }
