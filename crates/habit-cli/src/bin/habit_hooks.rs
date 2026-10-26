@@ -32,12 +32,17 @@ struct Cli {
 
     #[arg(long = "no-snooze", help = "Do not filter out snoozed issues")]
     no_snooze: bool,
+
+    #[arg(long = "no-judge", help = "Disable System-1 judge triage stage")]
+    no_judge: bool,
 }
 
 #[derive(Subcommand, Debug)]
 enum Commands {
     #[command(about = "Initialize Habit Hooks configuration and verify tools")]
     Init,
+    #[command(about = "Install Git pre-commit hook into .git/hooks/pre-commit")]
+    Install,
 }
 
 fn main() {
@@ -46,6 +51,13 @@ fn main() {
 
     if let Some(Commands::Init) = cli.command {
         run_init(&project_dir);
+        return;
+    }
+    if let Some(Commands::Install) = cli.command {
+        if let Err(err) = run_install(&project_dir) {
+            eprintln!("habit-hooks: {err}");
+            process::exit(1);
+        }
         return;
     }
 
@@ -65,12 +77,18 @@ fn main() {
     let runner = SensorRunner::new(&project_dir, &project_config, &plugins, &scope_args);
     let findings = runner.run_all();
 
-    let final_findings = if cli.no_snooze {
+    let triaged_findings = if cli.no_judge {
         findings
     } else {
+        habit_judge::triage_findings(findings, Some(&project_dir))
+    };
+
+    let final_findings = if cli.no_snooze {
+        triaged_findings
+    } else {
         match load_snooze_file(&project_dir) {
-            Ok(snooze) => filter_snoozed_findings(findings, &snooze, &project_dir),
-            Err(_) => findings,
+            Ok(snooze) => filter_snoozed_findings(triaged_findings, &snooze, &project_dir),
+            Err(_) => triaged_findings,
         }
     };
 
@@ -165,4 +183,43 @@ mainBranch = "main"
     } else {
         println!("\n⚠️ Some detectors are not installed yet. You can run the install commands above.");
     }
+}
+
+fn run_install(project_dir: &std::path::Path) -> Result<(), String> {
+    let git_dir = project_dir.join(".git");
+    if !git_dir.exists() {
+        return Err("Not a git repository".to_string());
+    }
+
+    let hooks_dir = git_dir.join("hooks");
+    if let Err(err) = fs::create_dir_all(&hooks_dir) {
+        return Err(format!("Failed to create .git/hooks directory: {err}"));
+    }
+
+    let pre_commit_path = hooks_dir.join("pre-commit");
+    let script = r#"#!/bin/sh
+# Habit Hooks automated pre-commit gate
+if command -v habit-hooks >/dev/null 2>&1; then
+    exec habit-hooks --changed
+else
+    echo "⚠️ habit-hooks not found in PATH; skipping pre-commit gate."
+fi
+"#;
+
+    if let Err(err) = fs::write(&pre_commit_path, script) {
+        return Err(format!("Failed to write pre-commit hook: {err}"));
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(metadata) = fs::metadata(&pre_commit_path) {
+            let mut perms = metadata.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&pre_commit_path, perms);
+        }
+    }
+
+    println!("✅ Installed Habit Hooks pre-commit hook in .git/hooks/pre-commit");
+    Ok(())
 }

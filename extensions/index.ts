@@ -34,10 +34,45 @@ export interface PiAgentHost {
   registerTool: (tool: Record<string, unknown>) => void;
   registerCommand?: (...args: unknown[]) => void;
   injectSystemPrompt?: (prompt: string) => void;
+  callTool?: (toolName: string, args: Record<string, unknown>) => Promise<unknown>;
+  ui?: {
+    setStatus?: (key: string, status: { text: string }) => void;
+    log?: (msg: string) => void;
+  };
   on?: (
     event: string,
-    handler: (data: { systemPrompt?: string | string[] }) => { systemPrompt?: string | string[] } | void
+    handler: (data: any, ctx?: any) => any
   ) => void;
+}
+
+export async function validateUnwrapWithLaya(
+  finding: { smell: string; issues?: Array<{ details?: { content?: string } }> },
+  pi: PiAgentHost
+): Promise<boolean | undefined> {
+  if (finding.smell !== "unhandled-unwrap" || typeof pi.callTool !== "function") {
+    return undefined;
+  }
+
+  const content = finding.issues?.[0]?.details?.content ?? "";
+  try {
+    const resp = (await pi.callTool("mcp__laya_predict", {
+      state: { text: content },
+      questions: {
+        is_safe: {
+          type: "choice",
+          instructions: "Is this unwrap safe due to a local invariant or guard?",
+          criteria: { safe: "The unwrap is safely guarded", unsafe: "The unwrap may panic" },
+        },
+      },
+    })) as any;
+
+    if (resp?.answers?.is_safe?.choice === "safe" && (resp.answers.is_safe.confidence ?? 0) >= 0.6) {
+      return true;
+    }
+  } catch {
+    // Silently continue if Laya MCP is not mounted
+  }
+  return false;
 }
 
 export default function (pi: PiAgentHost) {
@@ -229,11 +264,17 @@ export default function (pi: PiAgentHost) {
       handler: (args: string, context?: ExtensionContext) => Promise<void>
     ) => {
       try {
-        // Standard Pi signature: pi.registerCommand(name, { description, handler })
-        pi.registerCommand!(name, { description, handler });
+        if (typeof pi.registerCommand === "function") {
+          if (pi.registerCommand.length === 1) {
+            pi.registerCommand({ name, description, handler });
+          } else if (pi.registerCommand.length === 3) {
+            (pi.registerCommand as any)(name, description, handler);
+          } else {
+            pi.registerCommand(name, { description, handler });
+          }
+        }
       } catch {
         try {
-          // Alternative signature: pi.registerCommand({ name, description, handler })
           pi.registerCommand!({ name, description, handler });
         } catch {
           // Ignore if host doesn't support command registration
@@ -270,6 +311,70 @@ export default function (pi: PiAgentHost) {
         }
       }
     });
+  }
+
+  // 5. Event-Driven Lifecycle: tool_call incremental scan & status badge update
+  if (typeof pi.on === "function") {
+    pi.on("tool_call", async (data: any, ctxArg?: ExtensionContext) => {
+      const toolName = data?.tool ?? data?.name ?? data?.toolName;
+      const params = data?.params ?? data?.input ?? data?.args;
+      const filePath = params?.path ?? params?.filePath ?? params?.file;
+
+      if (!filePath || typeof filePath !== "string") {
+        return;
+      }
+
+      const isEditOrWrite = toolName === "edit" || toolName === "write" || !toolName;
+      const isTargetLang = /\.(rs|js|ts|jsx|tsx)$/.test(filePath);
+
+      if (isEditOrWrite && isTargetLang) {
+        const ctx = ctxArg ?? data?.ctx;
+        const cwd = ctx?.cwd;
+        const result = runHabitHooks({ scope: "working", files: [filePath], cwd });
+
+        const smellHeaders = (result.output.match(/^###\s+[a-z0-9-]+/gm) || []).length;
+        const count = smellHeaders > 0 ? smellHeaders : (result.passed ? 0 : 1);
+
+        const setStatus = ctx?.ui?.setStatus ?? pi.ui?.setStatus;
+        if (typeof setStatus === "function") {
+          if (result.passed && count === 0) {
+            setStatus("habit-hooks", { text: "✅ clean" });
+          } else {
+            setStatus("habit-hooks", { text: `⚠️ ${count} smell(s)` });
+          }
+        }
+
+        if (!result.passed && count > 0) {
+          return {
+            additionalContext: `⚠️ Habit Hooks coaching feedback for ${filePath}:\n\n${result.output}`,
+          };
+        }
+      }
+    });
+
+    // 6. Pre-Yield Quality Gate: turn_end / before_yield / session_stop intercept
+    const preYieldGateHandler = (data: any, ctxArg?: ExtensionContext) => {
+      const ctx = ctxArg ?? data?.ctx;
+      const cwd = ctx?.cwd ?? data?.cwd;
+      const result = runHabitHooks({ scope: "working", cwd });
+
+      if (result.exitCode === 1) {
+        const feedback =
+          `⚠️ Habit Hooks Quality Gate: Enforced code smell detected...\n\n${result.output}\n\nPlease refactor before completing.`;
+        return {
+          interrupt: true,
+          decision: "block",
+          reason: feedback,
+          message: feedback,
+        };
+      }
+
+      return { interrupt: false };
+    };
+
+    pi.on("turn_end", preYieldGateHandler);
+    pi.on("before_yield", preYieldGateHandler);
+    pi.on("session_stop", preYieldGateHandler);
   }
 
   if (typeof pi.injectSystemPrompt === "function") {

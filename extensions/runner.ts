@@ -18,10 +18,14 @@ function findPackageRoot(startDir: string): string {
 
 const PACKAGE_ROOT = findPackageRoot(__dirname);
 
-export function resolveBinary(name: "habit-hooks" | "habit-snooze" | "habit-sensors" | "habit-mapper"): string {
+export function resolveBinary(
+  name: "habit-hooks" | "habit-snooze" | "habit-sensors" | "habit-mapper" | "habit-judge"
+): string {
+  const exeName = process.platform === "win32" ? `${name}.exe` : name;
   const candidates = [
-    join(PACKAGE_ROOT, "target", "release", name),
-    join(PACKAGE_ROOT, "target", "debug", name),
+    join(PACKAGE_ROOT, "target", "release", exeName),
+    join(PACKAGE_ROOT, "target", "debug", exeName),
+    join(PACKAGE_ROOT, "bin", exeName),
   ];
 
   for (const candidate of candidates) {

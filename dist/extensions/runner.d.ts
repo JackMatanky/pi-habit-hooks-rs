@@ -1,4 +1,4 @@
-export declare function resolveBinary(name: "habit-hooks" | "habit-snooze" | "habit-sensors" | "habit-mapper"): string;
+export declare function resolveBinary(name: "habit-hooks" | "habit-snooze" | "habit-sensors" | "habit-mapper" | "habit-judge"): string;
 export interface RunHabitHooksOptions {
     scope?: "working" | "staged" | "all" | "since";
     sinceRef?: string;

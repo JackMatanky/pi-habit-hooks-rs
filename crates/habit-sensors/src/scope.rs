@@ -91,7 +91,7 @@ pub fn discover_files(
         || args.branch.is_some()
         || args.since.is_some()
         || args.last.is_some()
-        || (!args.all && config.changed_only);
+        || (!args.all && (config.changed_only || config.auto_branch_off_main));
 
     if is_git_mode && canonical_root.join(".git").exists() {
         let git_files = query_git_files(&canonical_root, args, config)?;
@@ -165,6 +165,59 @@ fn query_git_files(
             files.insert(line.trim().to_string());
         }
         return Ok(files.into_iter().collect());
+    }
+
+    // Auto branch off main resolution
+    if !args.all
+        && args.files.is_empty()
+        && args.since.is_none()
+        && args.branch.is_none()
+        && args.last.is_none()
+        && config.auto_branch_off_main
+    {
+        if let Ok(branch_output) = run_git(project_dir, &["rev-parse", "--abbrev-ref", "HEAD"]) {
+            let current_branch = branch_output.trim();
+            if !current_branch.is_empty() && current_branch != config.main_branch {
+                let origin_main = format!("origin/{}", config.main_branch);
+                let merge_base = run_git(project_dir, &["merge-base", "HEAD", &origin_main])
+                    .or_else(|_| run_git(project_dir, &["merge-base", "HEAD", &config.main_branch]));
+
+                if let Ok(mb_out) = merge_base {
+                    let sha = mb_out.trim();
+                    if sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()) {
+                        if let Ok(diff) = run_git(
+                            project_dir,
+                            &["diff", "--name-only", &format!("{sha}...HEAD")],
+                        ) {
+                            for line in diff.lines() {
+                                let trimmed = line.trim();
+                                if !trimmed.is_empty() {
+                                    files.insert(trimmed.to_string());
+                                }
+                            }
+                        }
+
+                        if let Ok(status) = run_git(project_dir, &["status", "--porcelain"]) {
+                            for line in status.lines() {
+                                if line.len() > 3 {
+                                    let path_part = line[3..].trim();
+                                    let target = if let Some((_old, new)) = path_part.split_once(" -> ") {
+                                        new.trim()
+                                    } else {
+                                        path_part
+                                    };
+                                    if !target.is_empty() {
+                                        files.insert(target.to_string());
+                                    }
+                                }
+                            }
+                        }
+
+                        return Ok(files.into_iter().collect());
+                    }
+                }
+            }
+        }
     }
 
     // Default changed files: git status (working tree + index)
@@ -242,6 +295,71 @@ mod tests {
                 filtered,
                 vec!["src/main.rs".to_string(), "src/lib.rs".to_string()]
             );
+        }
+    }
+
+    mod auto_branch_scoping {
+        use super::*;
+        use pretty_assertions::assert_eq;
+        use std::fs;
+        use std::process::Command;
+        use tempfile::tempdir;
+
+        fn run_cmd(dir: &Path, program: &str, args: &[&str]) {
+            let output = Command::new(program)
+                .current_dir(dir)
+                .args(args)
+                .output()
+                .expect("failed to execute process");
+            assert!(
+                output.status.success(),
+                "command failed: {} {:?}\nstderr: {}",
+                program,
+                args,
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        #[test]
+        fn scopes_to_feature_branch_changes_against_main() {
+            let dir = tempdir().unwrap();
+            let path = dir.path();
+
+            // Initialize git repo
+            run_cmd(path, "git", &["init"]);
+            run_cmd(path, "git", &["config", "user.name", "Test Runner"]);
+            run_cmd(path, "git", &["config", "user.email", "test@runner.local"]);
+            run_cmd(path, "git", &["checkout", "-b", "main"]);
+
+            // Create baseline file on main
+            fs::write(path.join("baseline.rs"), "fn baseline() {}\n").unwrap();
+            run_cmd(path, "git", &["add", "baseline.rs"]);
+            run_cmd(path, "git", &["commit", "-m", "initial baseline"]);
+
+            // Create feature branch
+            run_cmd(path, "git", &["checkout", "-b", "feature/test"]);
+
+            // Add commit on feature branch
+            fs::write(path.join("feature.rs"), "fn feature() {}\n").unwrap();
+            run_cmd(path, "git", &["add", "feature.rs"]);
+            run_cmd(path, "git", &["commit", "-m", "feature commit"]);
+
+            // Add uncommitted working tree change
+            fs::write(path.join("working.rs"), "fn working() {}\n").unwrap();
+
+            let config = ScopeConfig {
+                auto_branch_off_main: true,
+                main_branch: "main".to_string(),
+                ..Default::default()
+            };
+            let args = ScopeArgs::default();
+
+            let files = discover_files(path, &args, &config, &[]).unwrap();
+            assert_eq!(
+                files,
+                vec!["feature.rs".to_string(), "working.rs".to_string()]
+            );
+            assert!(!files.contains(&"baseline.rs".to_string()));
         }
     }
 }

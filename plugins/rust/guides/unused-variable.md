@@ -10,3 +10,10 @@ Unused variables indicate incomplete refactorings, dead code paths, or logic err
 **Rust Idioms & Coaching:**
 - Remove the variable if its value is unnecessary.
 - Prefix with `_` (e.g. `_unused`) only if required to satisfy a trait signature or tuple pattern without consuming.
+
+### Recommended Fix Command
+Run compiler auto-fixes on working changes:
+```bash
+cargo clippy --fix --allow-no-vcs
+cargo fmt
+```

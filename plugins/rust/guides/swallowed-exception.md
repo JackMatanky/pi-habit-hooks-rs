@@ -18,3 +18,10 @@ Swallowing errors (e.g. `let _ = ...`, `match res { Err(_) => () }`) hides root 
    }
    ```
 3. **Explicit Handling**: If ignoring an error is genuinely intended by design, document the rationale in a comment and log at debug/trace level rather than silently dropping it.
+
+### Recommended Fix Command
+Run compiler auto-fixes on working changes:
+```bash
+cargo clippy --fix --allow-no-vcs
+cargo fmt
+```

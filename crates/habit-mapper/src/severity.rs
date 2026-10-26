@@ -78,9 +78,21 @@ pub fn evaluate_and_render(
         let severity = if let Some(smell_cfg) = config.smells.get(&finding.smell) {
             if let Some(sev) = smell_cfg.severity {
                 Some(sev)
+            } else if let Some(sev) = finding
+                .details
+                .get("severity")
+                .and_then(|v| serde_json::from_value::<Severity>(v.clone()).ok())
+            {
+                Some(sev)
             } else {
                 resolve_smell_severity(&finding.smell, config.uncoached)
             }
+        } else if let Some(sev) = finding
+            .details
+            .get("severity")
+            .and_then(|v| serde_json::from_value::<Severity>(v.clone()).ok())
+        {
+            Some(sev)
         } else {
             resolve_smell_severity(&finding.smell, config.uncoached)
         };

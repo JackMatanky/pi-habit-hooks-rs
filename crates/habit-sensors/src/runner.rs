@@ -2,9 +2,10 @@ use crate::detector::{DetectorError, DetectorResolver};
 use crate::scope::{filter_files_by_globs, ScopeArgs};
 use crate::transform::evaluate_jq;
 use habit_core::{anchor_findings, Finding, Issue, IssueDetails, PluginConfig, ProjectConfig, SensorConfig};
+use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use tempfile::tempdir;
 
@@ -29,6 +30,13 @@ pub fn make_incomplete_run(sensor_name: &str, message: &str) -> Finding {
         }],
     }
 }
+struct SensorJob<'a> {
+    plugin: &'a PluginConfig,
+    sensor: &'a SensorConfig,
+    tool_path: PathBuf,
+    files: Vec<String>,
+}
+
 
 pub struct SensorRunner<'a> {
     pub project_dir: &'a Path,
@@ -54,6 +62,7 @@ impl<'a> SensorRunner<'a> {
 
     pub fn run_all(&self) -> Vec<Finding> {
         let mut all_findings = Vec::new();
+        let mut jobs = Vec::new();
 
         for plugin in self.plugins {
             let resolver = DetectorResolver::new(
@@ -137,22 +146,54 @@ impl<'a> SensorRunner<'a> {
                     }
                 };
 
-                // Execute sensor with chunking
-                let sensor_findings = self.run_sensor_chunks(
+                jobs.push(SensorJob {
                     plugin,
                     sensor,
-                    &resolved_tool,
-                    &sensor_files,
-                );
-
-                for mut finding in sensor_findings {
-                    if finding.language.is_none() {
-                        finding.language = plugin.language.clone();
-                    }
-                    all_findings.push(finding);
-                }
+                    tool_path: resolved_tool,
+                    files: sensor_files,
+                });
             }
         }
+
+        let job_findings: Vec<Vec<Finding>> = jobs
+            .into_par_iter()
+            .map(|job| {
+                let mut sensor_findings = self.run_sensor_chunks(
+                    job.plugin,
+                    job.sensor,
+                    &job.tool_path,
+                    &job.files,
+                );
+                for finding in &mut sensor_findings {
+                    if finding.language.is_none() {
+                        finding.language = job.plugin.language.clone();
+                    }
+                }
+                sensor_findings
+            })
+            .collect();
+
+        for batch in job_findings {
+            all_findings.extend(batch);
+        }
+
+        all_findings.sort_by(|a, b| {
+            let a_file = a.issues.first().map(|i| i.details.file.as_str()).unwrap_or("");
+            let b_file = b.issues.first().map(|i| i.details.file.as_str()).unwrap_or("");
+            let a_line = a.issues.first().and_then(|i| i.details.line).unwrap_or(0);
+            let b_line = b.issues.first().and_then(|i| i.details.line).unwrap_or(0);
+            let a_col = a.issues.first().and_then(|i| i.details.column).unwrap_or(0);
+            let b_col = b.issues.first().and_then(|i| i.details.column).unwrap_or(0);
+            let a_key = a.issues.first().map(|i| i.key.as_str()).unwrap_or("");
+            let b_key = b.issues.first().map(|i| i.key.as_str()).unwrap_or("");
+            (a.smell.as_str(), a_file, a_line, a_col, a_key)
+                .cmp(&(b.smell.as_str(), b_file, b_line, b_col, b_key))
+                .then_with(|| {
+                    serde_json::to_string(a)
+                        .unwrap_or_default()
+                        .cmp(&serde_json::to_string(b).unwrap_or_default())
+                })
+        });
 
         all_findings
     }
