@@ -13,9 +13,9 @@ export interface ToolResult {
 export interface ExtensionContext {
     cwd?: string;
     ui?: {
-        setStatus?: (key: string, status: {
+        setStatus?: (key: string, status: string | {
             text: string;
-        }) => void;
+        } | undefined) => void;
         log?: (msg: string) => void;
     };
 }
@@ -25,9 +25,9 @@ export interface PiAgentHost {
     injectSystemPrompt?: (prompt: string) => void;
     callTool?: (toolName: string, args: Record<string, unknown>) => Promise<unknown>;
     ui?: {
-        setStatus?: (key: string, status: {
+        setStatus?: (key: string, status: string | {
             text: string;
-        }) => void;
+        } | undefined) => void;
         log?: (msg: string) => void;
     };
     on?: (event: string, handler: (data: any, ctx?: any) => any) => void;

@@ -60,12 +60,12 @@ test("registers tools and commands with host", () => {
 
 test("lifecycle: tool_call event updates status badge", async () => {
   const handlers: Record<string, Array<Function>> = {};
-  const statusUpdates: Array<{ key: string; status: { text: string } }> = [];
+  const statusUpdates: Array<{ key: string; status: string | { text: string } | undefined }> = [];
 
   const mockPi = {
     registerTool: () => {},
     ui: {
-      setStatus: (key: string, status: { text: string }) => {
+      setStatus: (key: string, status: string | { text: string } | undefined) => {
         statusUpdates.push({ key, status });
       },
     },
@@ -87,9 +87,9 @@ test("lifecycle: tool_call event updates status badge", async () => {
 
   assert.ok(statusUpdates.length > 0);
   assert.equal(statusUpdates[0].key, "habit-hooks");
+  const statusVal = typeof statusUpdates[0].status === "object" ? statusUpdates[0].status?.text : statusUpdates[0].status;
   assert.ok(
-    statusUpdates[0].status.text.includes("clean") ||
-      statusUpdates[0].status.text.includes("smell")
+    statusVal?.includes("clean") || statusVal?.includes("smell")
   );
 });
 
@@ -200,7 +200,7 @@ test("compatibility: works with Oh My Pi (OMP) host environment", async () => {
   const commands: Record<string, any> = {};
   const handlers: Record<string, Function[]> = {};
   let injectedPrompt = "";
-  const statusUpdates: Array<{ key: string; status: { text: string } }> = [];
+  const statusUpdates: Array<{ key: string; status: string | { text: string } | undefined }> = [];
 
   const ompHost = {
     registerTool: (tool: any) => {
@@ -213,7 +213,7 @@ test("compatibility: works with Oh My Pi (OMP) host environment", async () => {
       injectedPrompt = prompt;
     },
     ui: {
-      setStatus: (key: string, status: { text: string }) => {
+      setStatus: (key: string, status: string | { text: string } | undefined) => {
         statusUpdates.push({ key, status });
       },
     },

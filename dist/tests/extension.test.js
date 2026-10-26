@@ -75,8 +75,8 @@ test("lifecycle: tool_call event updates status badge", async () => {
     });
     assert.ok(statusUpdates.length > 0);
     assert.equal(statusUpdates[0].key, "habit-hooks");
-    assert.ok(statusUpdates[0].status.text.includes("clean") ||
-        statusUpdates[0].status.text.includes("smell"));
+    const statusVal = typeof statusUpdates[0].status === "object" ? statusUpdates[0].status?.text : statusUpdates[0].status;
+    assert.ok(statusVal?.includes("clean") || statusVal?.includes("smell"));
 });
 test("lifecycle: turn_end pre-yield gate passes cleanly or interrupts on smell", async () => {
     const handlers = {};

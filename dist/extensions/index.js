@@ -79,12 +79,8 @@ export default function (pi) {
                 cwd,
             });
             if (ctx?.ui?.setStatus) {
-                if (result.passed) {
-                    ctx.ui.setStatus("habit-hooks", { text: "✅ clean" });
-                }
-                else {
-                    ctx.ui.setStatus("habit-hooks", { text: "⚠️ coaching active" });
-                }
+                const statusText = result.passed ? "✅ clean" : "⚠️ coaching active";
+                ctx.ui.setStatus("habit-hooks", statusText);
             }
             return {
                 content: [{ type: "text", text: result.output }],
@@ -109,12 +105,8 @@ export default function (pi) {
                 cwd,
             });
             if (context?.ui?.setStatus) {
-                if (result.passed) {
-                    context.ui.setStatus("habit-hooks", { text: "✅ clean" });
-                }
-                else {
-                    context.ui.setStatus("habit-hooks", { text: "⚠️ coaching active" });
-                }
+                const statusText = result.passed ? "✅ clean" : "⚠️ coaching active";
+                context.ui.setStatus("habit-hooks", statusText);
             }
             return {
                 content: [{ type: "text", text: result.output }],
@@ -260,12 +252,8 @@ export default function (pi) {
                 const count = smellHeaders > 0 ? smellHeaders : (result.passed ? 0 : 1);
                 const setStatus = ctx?.ui?.setStatus ?? pi.ui?.setStatus;
                 if (typeof setStatus === "function") {
-                    if (result.passed && count === 0) {
-                        setStatus("habit-hooks", { text: "✅ clean" });
-                    }
-                    else {
-                        setStatus("habit-hooks", { text: `⚠️ ${count} smell(s)` });
-                    }
+                    const statusText = result.passed && count === 0 ? "✅ clean" : `⚠️ ${count} smell(s)`;
+                    setStatus("habit-hooks", statusText);
                 }
                 if (!result.passed && count > 0) {
                     return {
