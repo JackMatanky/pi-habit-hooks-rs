@@ -86,7 +86,14 @@ pub fn find_plugin_dir(project_dir: &Path, plugin_name: &str) -> Option<PathBuf>
 pub fn load_enabled_plugins(project_dir: &Path, config: &ProjectConfig) -> Vec<PluginConfig> {
     let mut plugins = Vec::new();
 
+    let is_rust_project = project_dir.join("Cargo.toml").is_file();
+
     for plugin_name in &config.plugins {
+        // Auto-disable rust plugin if project is not a Rust project (no Cargo.toml)
+        if plugin_name == "rust" && !is_rust_project {
+            continue;
+        }
+
         if let Some(p_dir) = find_plugin_dir(project_dir, plugin_name) {
             let config_file = p_dir.join("config.toml");
             if let Ok(p_cfg) = PluginConfig::load_from_file(&config_file) {
@@ -96,4 +103,36 @@ pub fn load_enabled_plugins(project_dir: &Path, config: &ProjectConfig) -> Vec<P
     }
 
     plugins
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn auto_disables_rust_plugin_when_cargo_toml_is_absent() {
+        let dir = tempdir().unwrap();
+        let mut config = ProjectConfig::default();
+        config.plugins = vec!["rust".to_string()];
+
+        let plugins = load_enabled_plugins(dir.path(), &config);
+        assert!(plugins.is_empty(), "rust plugin should be auto-disabled when Cargo.toml is absent");
+    }
+
+    #[test]
+    fn keeps_rust_plugin_when_cargo_toml_is_present() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("Cargo.toml"), "[package]\nname = \"test\"\n").unwrap();
+        // Create local .habit-hooks/rust/config.toml so find_plugin_dir succeeds in isolated tempdir
+        let rust_plugin_dir = dir.path().join(".habit-hooks").join("rust");
+        std::fs::create_dir_all(&rust_plugin_dir).unwrap();
+        std::fs::write(rust_plugin_dir.join("config.toml"), "language = \"rust\"\nfiles = [\"**/*.rs\"]\nsensors = []\n").unwrap();
+
+        let mut config = ProjectConfig::default();
+        config.plugins = vec!["rust".to_string()];
+
+        let plugins = load_enabled_plugins(dir.path(), &config);
+        assert_eq!(plugins.len(), 1, "rust plugin should be enabled when Cargo.toml is present");
+    }
 }

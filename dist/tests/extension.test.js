@@ -78,6 +78,48 @@ test("lifecycle: tool_call event updates status badge", async () => {
     const statusVal = typeof statusUpdates[0].status === "object" ? statusUpdates[0].status?.text : statusUpdates[0].status;
     assert.ok(statusVal?.includes("clean") || statusVal?.includes("smell"));
 });
+test("lifecycle: tool_call ignores non-rust files", async () => {
+    const handlers = {};
+    const statusUpdates = [];
+    const mockPi = {
+        registerTool: () => { },
+        ui: {
+            setStatus: (key, status) => {
+                statusUpdates.push({ key, status });
+            },
+        },
+        on: (event, handler) => {
+            handlers[event] = handlers[event] || [];
+            handlers[event].push(handler);
+        },
+    };
+    registerExtension(mockPi);
+    assert.ok(handlers["tool_call"] && handlers["tool_call"].length > 0);
+    // Simulate tool_call on a markdown or typescript file
+    const toolCallHandler = handlers["tool_call"][0];
+    const res = await toolCallHandler({
+        tool: "edit",
+        params: { path: "README.md" },
+    });
+    assert.equal(res, undefined);
+    assert.equal(statusUpdates.length, 0);
+});
+test("lifecycle: turn_end pre-yield gate skips non-rust projects", async () => {
+    const handlers = {};
+    const mockPi = {
+        registerTool: () => { },
+        on: (event, handler) => {
+            handlers[event] = handlers[event] || [];
+            handlers[event].push(handler);
+        },
+    };
+    registerExtension(mockPi);
+    assert.ok(handlers["turn_end"] && handlers["turn_end"].length > 0);
+    const turnEndHandler = handlers["turn_end"][0];
+    // In a directory without Cargo.toml (e.g. /tmp)
+    const res = await turnEndHandler({ cwd: "/tmp" });
+    assert.deepEqual(res, { interrupt: false });
+});
 test("lifecycle: turn_end pre-yield gate passes cleanly or interrupts on smell", async () => {
     const handlers = {};
     const mockPi = {

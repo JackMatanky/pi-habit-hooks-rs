@@ -1,5 +1,6 @@
+import * as fs from "node:fs";
+import * as path from "node:path";
 import { runHabitHooks, runHabitSnooze } from "./runner.js";
-
 const SYSTEM_GUIDELINES = `
 ## Habit Hooks Quality Coaching Rules
 1. Before completing any non-trivial code modification turn, run 'habit_hooks' to ensure no code smells were introduced.
@@ -319,8 +320,7 @@ export default function (pi: PiAgentHost) {
       }
 
       const isEditOrWrite = toolName === "edit" || toolName === "write" || !toolName;
-      const isTargetLang = /\.(rs|js|ts|jsx|tsx)$/.test(filePath);
-
+      const isTargetLang = /\.rs$/i.test(filePath);
       if (isEditOrWrite && isTargetLang) {
         const ctx = ctxArg ?? data?.ctx;
         const cwd = ctx?.cwd;
@@ -346,9 +346,11 @@ export default function (pi: PiAgentHost) {
     // 6. Pre-Yield Quality Gate: turn_end / before_yield / session_stop intercept
     const preYieldGateHandler = (data: any, ctxArg?: ExtensionContext) => {
       const ctx = ctxArg ?? data?.ctx;
-      const cwd = ctx?.cwd ?? data?.cwd;
+      const cwd = ctx?.cwd ?? data?.cwd ?? process.cwd();
+      if (!fs.existsSync(path.join(cwd, "Cargo.toml"))) {
+        return { interrupt: false };
+      }
       const result = runHabitHooks({ scope: "working", cwd });
-
       if (result.exitCode === 1) {
         const feedback =
           `⚠️ Habit Hooks Quality Gate: Enforced code smell detected...\n\n${result.output}\n\nPlease refactor before completing.`;

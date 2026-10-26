@@ -88,6 +88,11 @@ impl<'a> SensorRunner<'a> {
                 }
             };
 
+            // If no files match the plugin's file globs in the discovered scope, skip all sensors for this plugin
+            if plugin_files.is_empty() {
+                continue;
+            }
+
             for sensor in &plugin.sensors {
                 // Check if sensor is disabled in project config
                 if let Some(sensor_override) = self.project_config.sensors.get(&sensor.name) {
@@ -482,6 +487,45 @@ mod tests {
                     "src/b.rs".to_string(),
                 ]
             );
+        }
+
+        #[test]
+        fn short_circuits_when_no_matching_files_in_scope() {
+            let dir = tempdir().unwrap();
+            // Create non-rust file
+            fs::write(dir.path().join("README.md"), "hello").unwrap();
+
+            let project_cfg = ProjectConfig::default();
+            let plugin_cfg = PluginConfig {
+                language: Some("rust".to_string()),
+                plugin_dir: dir.path().to_path_buf(),
+                files: vec!["**/*.rs".to_string()],
+                detectors: vec![],
+                sensors: vec![SensorConfig {
+                    name: "test-sensor".to_string(),
+                    // tool that doesn't exist; if run, it would fail with missing tool
+                    tool: "nonexistent_tool_12345".to_string(),
+                    args: vec!["${files}".to_string()],
+                    success_exit_codes: vec![0],
+                    transform: None,
+                }],
+            };
+
+            let scope_args = ScopeArgs {
+                all: true,
+                ..Default::default()
+            };
+            let plugins = [plugin_cfg];
+            let runner = SensorRunner::new(
+                dir.path(),
+                &project_cfg,
+                &plugins,
+                &scope_args,
+            );
+
+            let findings = runner.run_all();
+            // Because there are no .rs files, the plugin was short-circuited and nonexistent_tool wasn't even resolved
+            assert_eq!(findings, vec![]);
         }
     }
 }
